@@ -1,0 +1,26 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+panel = "*"
+watchfiles = "*"
+bokeh = "*"
+jupyter-bokeh = "*"
+facebook-business = "*"
+facebook-sdk = "*"
+google-ads = "*"
+hvplot = "*"
+python-dotenv = "*"
+google-analytics-data = "*"
+hubspot-api-client = "*"
+pyparsing = "*"
+itables = "*"
+gspread = "*"
+
+[dev-packages]
+ipykernel = "*"
+
+[requires]
+python_version = "3.12"

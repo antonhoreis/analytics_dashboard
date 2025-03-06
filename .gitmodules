@@ -1,0 +1,3 @@
+[submodule "api_clients"]
+	path = api_clients
+	url = https://github.com/antonhoreis/api_clients
