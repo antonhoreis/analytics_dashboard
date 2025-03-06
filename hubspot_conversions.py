@@ -3,6 +3,10 @@ import time
 from api_clients import hubspot_api as hubspot, calendly_api as calendly
 import pandas as pd
 import datetime
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -13,7 +17,9 @@ calendly_data = (
     .set_index("email")
     .sort_values(by="created_at")
 )
-FIRST_CALL_DATA_UPDATED_AT = datetime.datetime(2025, 3, 6)
+FIRST_CALL_DATA_UPDATED_AT = datetime.datetime.strptime(
+    os.getenv("FIRST_CALL_DATA_UPDATED_AT"), "%Y-%m-%d"
+)
 
 
 def get_deals():
@@ -186,6 +192,8 @@ def get_placement_calls():
 
 
 def get_hubspot_conversions(fetch_deals=True):
+    global calendly_data
+
     if fetch_deals:
         get_deals()
     first_calls_df = get_first_calls()
@@ -193,7 +201,82 @@ def get_hubspot_conversions(fetch_deals=True):
     placement_deals = get_placement_calls()
 
     conversions = pd.concat([first_calls_df, verbal_agreement_deals, placement_deals])
-    # aggregate daily
-    conversions = conversions.groupby(["date", "conversion"]).size().reset_index()
 
-    return conversions
+    # Check if we need to update calendly_data for newer conversions
+    if not conversions.empty:
+        latest_date = conversions.index.max()
+        # Convert both timestamps to naive for comparison
+        latest_date_naive = (
+            latest_date.tz_localize(None) if latest_date.tzinfo else latest_date
+        )
+        updated_at_naive = (
+            FIRST_CALL_DATA_UPDATED_AT.tz_localize(None)
+            if FIRST_CALL_DATA_UPDATED_AT.tzinfo
+            else FIRST_CALL_DATA_UPDATED_AT
+        )
+
+        if latest_date_naive > updated_at_naive:
+            logger.info(
+                f"Retrieving new calendly data since {FIRST_CALL_DATA_UPDATED_AT}"
+            )
+            new_calendly_data = get_calendly_data(FIRST_CALL_DATA_UPDATED_AT)
+            # Combine with existing calendly_data, preferring newer data if duplicates
+            calendly_data = pd.concat([calendly_data, new_calendly_data])
+            calendly_data = calendly_data[~calendly_data.index.duplicated(keep="last")]
+
+    # Prepare utm columns for merging
+    utm_columns = [
+        "utm_campaign",
+        "utm_source",
+        "utm_medium",
+        "utm_content",
+        "utm_term",
+    ]
+
+    # Reset index of conversions to have date as a column
+    conversions_reset = conversions.reset_index()
+
+    # Enrich conversions with UTM data by joining on email
+    enriched_conversions = pd.merge(
+        conversions_reset,
+        calendly_data[utm_columns],
+        left_on="contact_email",
+        right_index=True,
+        how="left",
+    )
+
+    # Fill missing UTM values
+    for col in utm_columns:
+        if col in enriched_conversions.columns:
+            enriched_conversions[col] = enriched_conversions[col].fillna("unknown")
+        else:
+            enriched_conversions[col] = "unknown"
+
+    # Group by date, UTM parameters, and conversion type, then count
+    result = (
+        enriched_conversions.groupby(["date"] + utm_columns + ["conversion"])
+        .size()
+        .unstack(fill_value=0)  # Convert conversion types to columns
+    )
+
+    # Resample daily to ensure all days are represented
+    result = (
+        (
+            result.groupby(level=utm_columns)
+            .apply(lambda x: x.droplevel(utm_columns).resample("D").sum())
+            .fillna(0)
+        )
+        .reset_index()
+        .rename(
+            columns={
+                "utm_campaign": "Campaign",
+                "utm_source": "Source",
+                "utm_medium": "Medium",
+                "utm_content": "Content",
+                "utm_term": "Term",
+            }
+        )
+        .set_index("date")
+    )
+
+    return result

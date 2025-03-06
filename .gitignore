@@ -2,3 +2,4 @@ __pycache__/*
 Pipfile.lock
 .env
 credentials/** 
+data/calendly_first_call_data.csv

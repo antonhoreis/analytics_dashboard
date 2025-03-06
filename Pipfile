@@ -18,6 +18,7 @@ hubspot-api-client = "*"
 pyparsing = "*"
 itables = "*"
 gspread = "*"
+nbconvert = "*"
 
 [dev-packages]
 ipykernel = "*"

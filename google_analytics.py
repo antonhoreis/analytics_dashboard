@@ -103,11 +103,21 @@ def get_landing_page_report():
     )
 
     df = response_to_dataframe(response)
-    df = (
-        df[df.index.get_level_values(1).isin(["/hp-2", "/", "(not set)"])]
-        .reset_index()
-        .set_index("date")
+    df = df[
+        df.index.get_level_values(1).isin(["/hp-2", "/", "(not set)"])
+    ].reset_index()
+    df.date = pd.to_datetime(df.date)
+    df.landingPage = df.hostname.map(
+        {
+            "lalia-berlin.com": "Zenler ",
+            "page.lalia-berlin.com": "Hubspot",
+        }
+    ) + df.landingPage.map(
+        {
+            "(not set)": "1",
+            "/": "1",
+            "/hp-2": "2",
+        }
     )
-    df.index = pd.to_datetime(df.index)
 
     return df
