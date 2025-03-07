@@ -120,4 +120,22 @@ def get_landing_page_report():
         }
     )
 
-    return df
+    df.rename(
+        columns={
+            "sessionManualCampaignName": "campaign",
+            "sessionManualSource": "source",
+            "sessionManualMedium": "medium",
+            "sessionManualAdContent": "content",
+            "sessionManualTerm": "term",
+            "landingPage": "landing_page",
+        },
+        inplace=True,
+    )
+
+    # to snake case
+    df.columns = [
+        "".join("_" + c.lower() if c.isupper() else c for c in s)
+        for s in list(df.columns)
+    ]
+
+    return df.set_index("date")

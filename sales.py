@@ -180,11 +180,12 @@ def get_sales_data(filter=None):
         .reset_index()
         .rename(
             columns={
-                "utm_campaign": "Campaign",
-                "utm_source": "Source",
-                "utm_medium": "Medium",
-                "utm_content": "Content",
-                "utm_term": "Term",
+                "utm_campaign": "campaign",
+                "utm_source": "source",
+                "utm_medium": "medium",
+                "utm_content": "content",
+                "utm_term": "term",
+                "Sale": "sales",
             }
         )
         .set_index("date")

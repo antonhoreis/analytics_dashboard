@@ -135,12 +135,14 @@ def get_google_ads_campaign_metrics():
     logger.info(
         f"Retrieved Google Ads campaign metrics in {round(time.time() - start_time, 2)} seconds"
     )
+    df.columns = [
+        "".join("_" + c.lower() if c.isupper() else c for c in s)
+        for s in list(df.columns)
+    ]
     return df.rename(
         columns={
-            "campaign_name": "Campaign",
-            "cost": "Spend",
-            "impressions": "Impressions",
-            "clicks": "Clicks",
+            "campaign_name": "campaign",
+            "cost": "spend",
         }
     )
 
@@ -175,10 +177,6 @@ def get_facebook_ads_campaign_metrics():
     )
     return fb_campaign_df.rename(
         columns={
-            "campaign_name": "Campaign",
-            "spend": "Spend",
-            "impressions": "Impressions",
-            "clicks": "Clicks",
-            "reach": "Reach",
+            "campaign_name": "campaign",
         }
     )

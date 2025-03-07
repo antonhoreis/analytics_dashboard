@@ -191,7 +191,10 @@ def get_placement_calls():
     return placement_deals
 
 
-def get_hubspot_conversions(fetch_deals=True):
+def get_hubspot_conversions(fetch_deals=True, filters=None):
+    if filters:
+        raise NotImplementedError("Filters are not yet implemented")
+
     global calendly_data
 
     if fetch_deals:
@@ -269,14 +272,14 @@ def get_hubspot_conversions(fetch_deals=True):
         .reset_index()
         .rename(
             columns={
-                "utm_campaign": "Campaign",
-                "utm_source": "Source",
-                "utm_medium": "Medium",
-                "utm_content": "Content",
-                "utm_term": "Term",
+                "utm_campaign": "campaign",
+                "utm_source": "source",
+                "utm_medium": "medium",
+                "utm_content": "content",
+                "utm_term": "term",
             }
         )
         .set_index("date")
     )
-
+    result.columns = result.columns.str.lower().str.replace(" ", "_")
     return result
