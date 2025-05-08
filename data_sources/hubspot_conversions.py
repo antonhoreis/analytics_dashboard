@@ -1,3 +1,11 @@
+"""
+Fetches conversion data from Hubspot and Calendly.
+
+This script retrieves deal information, first call data (from both Hubspot meetings
+and Calendly events), and placement call data. It combines and processes this
+information to provide a consolidated view of customer conversions.
+"""
+
 import logging
 import time
 from api_clients import hubspot_api as hubspot, calendly_api as calendly
@@ -5,12 +13,14 @@ import pandas as pd
 import datetime
 import os
 from dotenv import load_dotenv
+import panel as pn
+# from simple_cache import timed_cache, clear_cache
 
 load_dotenv()
+pd.options.mode.chained_assignment = None  # default='warn'
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 deals_df = pd.DataFrame()
 calendly_data = (
     pd.read_csv("./data/calendly_first_call_data.csv")
@@ -22,6 +32,14 @@ FIRST_CALL_DATA_UPDATED_AT = datetime.datetime.strptime(
 )
 
 
+@pn.cache(ttl=60, to_disk=True)
+def get_users():
+    response = hubspot.get_client().crm.owners.owners_api.get_page()
+    users = pd.DataFrame(response.to_dict()["results"])
+    return users.set_index("id")
+
+
+@pn.cache(ttl=3600, to_disk=True)
 def get_deals():
     global deals_df
     logger.info("Retrieving deals from Hubspot")
@@ -49,6 +67,7 @@ def get_deals():
             "goals",
             "hs_tag_ids",
             "verbal_agreement",
+            "hubspot_owner_id",
         ],
         # association_types=["contacts"],
     )
@@ -63,7 +82,7 @@ def get_deals():
         )
         .drop(columns=["properties"])
         .convert_dtypes()
-    ).rename(columns={"createdAt": "date"})
+    ).rename(columns={"createdAt": "date", "hubspot_owner_id": "meeting_owner_id"})
     deals_df.date = pd.to_datetime(deals_df.date, format="ISO8601")
     deals_df.updatedAt = pd.to_datetime(deals_df.updatedAt, format="ISO8601")
     deals_df.hs_lastmodifieddate = pd.to_datetime(
@@ -77,6 +96,7 @@ def get_deals():
     return deals_df
 
 
+@pn.cache(ttl=3600, to_disk=True)
 def get_first_calls():
     start_time = time.time()
     logger.info("Retrieving first calls from Hubspot")
@@ -104,13 +124,38 @@ def get_first_calls():
             "hs_activity_type",
             "hs_meeting_start_time",
             "hs_meeting_outcome",
+            "hubspot_owner_id",
+            "hs_guest_emails",
         ],
-        # association_types=["contacts"],
+        association_types=["contacts"],
     )
     first_calls_df = pd.DataFrame(calendly_first_calls)
     first_calls_df = pd.concat(
         [first_calls_df, first_calls_df.properties.apply(pd.Series)], axis=1
     )
+
+    # Get contact email
+    first_calls_df["contact_id"] = first_calls_df.associations.apply(
+        lambda x: next(iter(pd.Series(x)["contacts"]), {}).get("toObjectId")
+    )
+    first_calls_df["contact_id"] = first_calls_df.contact_id.astype("Int64").astype(
+        "str"
+    )
+    contacts_df = pd.DataFrame(
+        hubspot.batch_get_objects(
+            object_type="contact",
+            object_ids=first_calls_df.contact_id.dropna().unique(),
+            properties=["email"],
+        )
+    )
+    contacts_df = pd.concat(
+        [contacts_df, contacts_df.properties.apply(pd.Series)], axis=1
+    )
+    contacts_df["hs_object_id"] = contacts_df.hs_object_id.astype("Int64").astype("str")
+    first_calls_df["contact_email"] = first_calls_df.contact_id.map(
+        contacts_df.set_index("hs_object_id")["email"]
+    )
+
     first_calls_df = (
         (
             first_calls_df.drop(columns=["properties"])
@@ -118,6 +163,7 @@ def get_first_calls():
                 columns={
                     "hs_meeting_title": "meeting_title",
                     "hs_activity_type": "activity_type",
+                    "hubspot_owner_id": "meeting_owner_id",
                     "createdAt": "date",
                 },
             )
@@ -168,7 +214,7 @@ def get_calendly_data(start_date: datetime.datetime):
         [calendly_data, calendly_data.tracking.apply(pd.Series)], axis=1
     ).drop(columns=["tracking"])
     logger.info(
-        f"Retrieved {len(calendly_data)} calendly data from Hubspot in {round(time.time() - start_time, 2)} seconds"
+        f"Retrieved {len(calendly_data)} meetings from calendly in {round(time.time() - start_time, 2)} seconds"
     )
     return calendly_data
 
@@ -176,7 +222,9 @@ def get_calendly_data(start_date: datetime.datetime):
 def get_first_call_verbal_agreements():
     if deals_df.empty:
         get_deals()
-    verbal_agreement_deals = deals_df[deals_df["hs_tag_ids"].str.contains("33264189")]
+    verbal_agreement_deals = deals_df[
+        deals_df["hs_tag_ids"].str.contains("33264189")
+    ]  # KeyError: delete file cache
     verbal_agreement_deals["conversion"] = "Verbal agreement after first call"
 
     return verbal_agreement_deals
@@ -203,7 +251,19 @@ def get_hubspot_conversions(fetch_deals=True, filters=None):
     verbal_agreement_deals = get_first_call_verbal_agreements()
     placement_deals = get_placement_calls()
 
+    # Get meeting owner name
+    users = get_users()
+
     conversions = pd.concat([first_calls_df, verbal_agreement_deals, placement_deals])
+    conversions["meeting_owner_name"] = (
+        conversions["meeting_owner_id"]
+        .map(users[["first_name", "last_name"]].to_dict("index"))
+        .apply(
+            lambda x: x["first_name"] + " " + x["last_name"]
+            if not pd.isna(x)
+            else pd.NA
+        )
+    )
 
     # Check if we need to update calendly_data for newer conversions
     if not conversions.empty:
@@ -255,21 +315,19 @@ def get_hubspot_conversions(fetch_deals=True, filters=None):
         else:
             enriched_conversions[col] = "unknown"
 
-    # Group by date, UTM parameters, and conversion type, then count
-    result = (
-        enriched_conversions.groupby(["date"] + utm_columns + ["conversion"])
-        .size()
-        .unstack(fill_value=0)  # Convert conversion types to columns
-    )
+    group_columns = ["meeting_owner_name"] + utm_columns + ["conversion"]
 
-    # Resample daily to ensure all days are represented
+    # Counts the number of conversions for each combination of date, UTM parameters, and conversion type and meeting owner
+    # unstack("conversion") creates a column for each conversion type
     result = (
-        (
-            result.groupby(level=utm_columns)
-            .apply(lambda x: x.droplevel(utm_columns).resample("D").sum())
-            .fillna(0)
-        )
+        enriched_conversions.set_index("date")
+        .groupby(group_columns)
+        .resample("D")
+        .size()
+        .unstack("conversion")
+        .fillna(0)
         .reset_index()
+        .set_index("date")
         .rename(
             columns={
                 "utm_campaign": "campaign",
@@ -279,7 +337,8 @@ def get_hubspot_conversions(fetch_deals=True, filters=None):
                 "utm_term": "term",
             }
         )
-        .set_index("date")
     )
+
     result.columns = result.columns.str.lower().str.replace(" ", "_")
+    result.index = result.index.tz_localize(None)
     return result

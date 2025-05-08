@@ -1,3 +1,12 @@
+"""
+Fetches data from Google Analytics (GA4) using the Data API.
+
+This script connects to the Google Analytics Data API (v1beta) to retrieve
+website analytics data, specifically focusing on landing page performance.
+It processes the API response into a structured pandas DataFrame for analysis,
+including session data, engagement metrics, and traffic source dimensions.
+"""
+
 import os
 import logging
 from dotenv import load_dotenv

@@ -1,3 +1,11 @@
+"""
+Fetches advertising campaign data from Google Ads and Facebook Ads.
+
+This script utilizes the respective API clients to retrieve campaign performance
+metrics (like spend, impressions, clicks, reach) from both platforms.
+It then parses and formats the data into pandas DataFrames for analysis.
+"""
+
 import pandas as pd
 import logging
 from api_clients.google_ads_api import GoogleAdsAPIWrapper
@@ -48,7 +56,7 @@ def parse_google_ads_campaigns_to_dataframe(campaigns):
     # Convert numeric columns to appropriate types
     numeric_columns = df.columns.difference(["campaign_name", "date"])
     for col in numeric_columns:
-        df[col] = pd.to_numeric(df[col], errors="ignore")
+        df[col] = pd.to_numeric(df[col])
 
     if "costMicros" in df.columns:
         df["cost"] = df["costMicros"] / 1_000_000
@@ -127,10 +135,10 @@ def parse_fb_insights_to_dataframe(campaign_insights):
     return df
 
 
-def get_google_ads_campaign_metrics():
+def get_google_ads_campaign_metrics(hourly: bool = False):
     start_time = time.time()
     logger.info("Retrieving Google Ads campaign metrics")
-    campaigns = google_ads_client.get_campaigns()
+    campaigns = google_ads_client.get_campaigns(hourly=hourly)
     df = parse_google_ads_campaigns_to_dataframe(campaigns)
     logger.info(
         f"Retrieved Google Ads campaign metrics in {round(time.time() - start_time, 2)} seconds"
@@ -147,7 +155,27 @@ def get_google_ads_campaign_metrics():
     )
 
 
-def get_facebook_ads_campaign_metrics():
+def get_facebook_ads_campaign_metrics(
+    since: str | None = None,
+    until: str | None = None,
+    date_preset: str | None = None,
+    time_increment: int | str = 1,
+):
+    """
+    Retrieve Facebook Ads campaign metrics.
+
+    Args:
+        since (str | None, optional): Date string in YYYY-MM-DD format. Defaults to None.
+        until (str | None, optional): Date string in YYYY-MM-DD format. Defaults to None.
+        date_preset (str | None, optional): Date preset. Defaults to None.
+        time_increment (int | str, optional): Time increment in days (int) or "hourly" (str) or "all_days" (str). Defaults to 1.
+
+    Raises:
+        ValueError: Either date_preset or since and until must be provided
+
+    Returns:
+        pd.DataFrame: DataFrame with campaign name and date as indices and metrics as columns
+    """
     start_time = time.time()
     logger.info("Retrieving Facebook Ads campaign metrics")
     fields = [
@@ -157,13 +185,23 @@ def get_facebook_ads_campaign_metrics():
         "clicks",
         "reach",
     ]
-
     params = {
-        "date_preset": "last_90d",
-        "time_increment": 1,
-        # "breakdowns": "campaign_name",
+        "time_increment": time_increment,
+        # "breakdowns": "hourly_stats_aggregated_by_advertiser_time_zone",
     }
-    fb_campaigns = get_campaigns(params={"date_preset": "last_90d"})
+    if time_increment == "hourly":
+        params["breakdowns"] = "hourly_stats_aggregated_by_advertiser_time_zone"
+        params["time_increment"] = 1
+    if date_preset:
+        params["date_preset"] = date_preset
+    elif since and until:
+        params["time_range"] = {
+            "since": since,
+            "until": until,
+        }
+    else:
+        raise ValueError("Either date_preset or since and until must be provided")
+    fb_campaigns = get_campaigns(params=params)
     campaign_insights = []
     for campaign in fb_campaigns:
         campaign_insights.append(

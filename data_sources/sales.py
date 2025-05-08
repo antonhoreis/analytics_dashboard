@@ -1,3 +1,13 @@
+"""
+Fetches sales data from a Google Sheet and enriches it with Calendly UTM data.
+
+This script reads sales transaction data from a specified Google Sheet,
+cleans and processes it (handling dates, amounts, duplicates), and then
+enriches it by merging with Calendly event data (specifically UTM parameters)
+based on email addresses. The final output is a DataFrame grouped by date
+and UTM parameters, showing daily sales counts.
+"""
+
 import gspread
 import pandas as pd
 import datetime
@@ -87,7 +97,7 @@ def get_sales_data(filter=None):
 
     global calendly_data
 
-    logger.info("Retrieving sales data")
+    logger.info("Retrieving sales data from Google Sheet")
     start_time = time.time()
     df = (
         read_gsheet_to_df(database_spreadsheet_id, sheet_id=zenler_data_sheet_id)
